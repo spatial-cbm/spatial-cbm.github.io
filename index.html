@@ -40,6 +40,10 @@
     figure { margin: 1.5em 0; }
     figure img { width: 100%; }
     .gallery img { border: 1px solid #ddd; border-radius: 4px; }
+    /* Bulma removes paragraph margins outside .content, so text ran into the next heading */
+    .section p { margin-bottom: 1em; }
+    .section h3.title { margin-top: 1.75em; }
+    .section h2.title + p, .section h2.title + h3.title { margin-top: 0; }
   </style>
 </head>
 <body>
@@ -99,7 +103,7 @@
       <div class="columns">
         <div class="column">
           <video autoplay muted loop playsinline width="100%"><source src="./static/videos/nav-rescued__imitate__DYehNKdT76V_0000000_toilet_115.mp4" type="video/mp4"></video>
-          <p class="cap">Navigation: Claude moves the costmap's minimum off the wall, and the robot reaches the goal.</p>
+          <p class="cap">Navigation: the VLM moves the costmap's minimum off the wall, and the robot reaches the goal.</p>
         </div>
         <div class="column">
           <video autoplay muted loop playsinline width="100%"><source src="./static/videos/steer-task7.mp4" type="video/mp4"></video>
@@ -114,21 +118,35 @@
   <div class="container is-max-desktop">
     <h2 class="title is-3">Method</h2>
 
+    <p>
+      We define a spatial concept as a geometric relationship between entities corresponding to the task and the robot, which can be computed directly from the scene's geometry.
+      The perception backend \(g\) predicts the spatial concept \(\hat{c}\) and the actor/controller head maps the concept and optionally the proprioceptive state \(\rho_t\) to action \(\hat{y}_t = f(\hat{c}_t, \rho_t)\).
+      The robot executes \(\hat{y}_t\), observes \(o_{t+1}\), and the loop repeats.
+    </p>
+    \[ c^k_t = \psi\big(a^k_t, r\big), \qquad r \in R_t \]
+    <p class="cap has-text-centered">The task mandates an exocentric entity \(a^k_t\), such as a navigation sub-goal or a destination point for the gripper, and the robot provides an egocentric entity \(r\).</p>
+
     <h3 class="title is-4">Navigation</h3>
     <figure>
       <img src="./static/images/nav-setup.png" alt="Navigation setup">
-      <figcaption class="cap">VGGT and a costmap head predict the costmap \(\hat C\), and the action head uses only the costmap to output five waypoints.</figcaption>
+      <figcaption class="cap">Spatial concept bottleneck for navigation. The concept predictor \(g\) (VGGT with fine-tuned global attention and a costmap head) predicts the costmap \(\hat C\) from the current view \(o_t\), the eight localized traversal frames \(m_{1..8}\) and the sub-goal \(a_t\). The task predictor \(f\) (the action head) takes only the costmap as input and outputs five waypoints.</figcaption>
     </figure>
-    \[ C_t(u) = \big\lVert a_t - X_t(u) \big\rVert_2 \]
-    <p class="cap has-text-centered">Each pixel's distance to the sub-goal \(a_t\).</p>
+    \[ C_t(u) = \psi\big(a^1_t, X_t(u)\big) = \big\lVert a^1_t - X_t(u) \big\rVert_2 \]
+    <p class="cap has-text-centered">We define a spatial concept bottleneck for navigation as a visual representation of navigation affordances in the robot's current view. The sub-goal pixel is the only anchor, and the egocentric entity is the 3D point \(X_t(u)\) of each pixel \(u\) of the current observation.</p>
 
     <h3 class="title is-4">Manipulation</h3>
     <figure>
       <img src="./static/images/manip-setup.png" alt="Manipulation setup">
-      <figcaption class="cap">SmolVLA with its image tokens removed from the action expert's prefix and replaced by the concept \(\hat c\).</figcaption>
+      <figcaption class="cap">Spatial concept bottleneck on SmolVLA. Left: the concept \(c\) is where the source (\(c^1\)) and the destination (\(c^2\)) are relative to the gripper. The frozen vision encoder feeds only the concept predictor \(g\), whose prediction \(\hat c\) enters the task predictor \(f\) as concept tokens, after the instruction \(H\) and the state, and the image tokens are removed. An intervention replaces \(\hat c\) with \(\tilde c\).</figcaption>
     </figure>
-    \[ c^k_t = \beta\left(a^k_t - r_t\right), \qquad k \in \{1, 2\} \]
-    <p class="cap has-text-centered">Source and destination relative to the gripper, binned by \(\beta\).</p>
+    \[ c^k_t = \psi (a^k_t, r_t) = \beta\left(a^k_t - r_t\right), \qquad k \in \{1, 2\} \]
+    <p>
+      For manipulation, we define two exocentric spatial entities: source and destination, corresponding respectively to the pick and place objects.
+      The source object defines where to act as \(a^1_t\) and the destination defines where to place as \(a^2_t\).
+      We use a single egocentric spatial entity that represents the end effector position \(r_t\), and \(\beta\) discretizes each axis of the difference in positions into 13 bins on a logarithmic scale.
+      The concept therefore consists of six values, the \(x\), \(y\) and \(z\) offsets of the source and of the destination from the gripper.
+      The bins are narrow near the gripper and wide far from it, giving centimetre precision close to the object and a coarse direction elsewhere.
+    </p>
     <div class="columns is-vcentered">
       <div class="column is-two-thirds">
         <img src="./static/images/manip-bins.png" alt="The concept along one rollout">
@@ -139,7 +157,7 @@
         </video>
       </div>
     </div>
-    <p class="cap">The concept along one rollout, with the bin of the source (orange) and the destination (blue) drawn around the gripper.</p>
+    <p class="cap">The concept along one rollout (LIBERO-Spatial, true concepts). Each box is the bin \(\beta\) puts the source (orange) or the destination (blue) in, drawn around the gripper. Green represents the object's true position. Below each frame, the 13 bins of one axis to scale, with the source's and the destination's bin. The triangle is the gripper.</p>
   </div>
 </section>
 
@@ -195,53 +213,74 @@
 <section class="section">
   <div class="container is-max-desktop">
     <h2 class="title is-3">Intervention</h2>
+    <p>
+      The key benefit of the bottleneck structure of CBMs is that they allow intervention of human-interpretable concepts at test time.
+      They provide insight into the model's intent which it <i>has</i> to use to generate outputs.
+      The intervener is provided all information of \(x_t\) and the predicted spatial concept \(\hat{c}_t\), and the oracle has additional access to the true concept \(c_t\).
+      Based on the design of the spatial concept bottleneck, the intervener provides exocentric entities \(\tilde{a}^k_t\), while the robot's own ego entities are unchanged.
+      We are thus able to re-generate the entire concept on intervention without changing all the exocentric entities.
+    </p>
+    \[ \tilde{c}^k_t = \psi\big(\tilde{a}^k_t, r\big), \qquad \tilde{y}_t = f(\tilde{c}_t, \rho_t) \]
 
     <h3 class="title is-4">Manipulation</h3>
+    <p>
+      In manipulation, the intervener provides the source or destination point \(\tilde{a}^k_t\), and the concept is regenerated.
+      We use the oracle as the intervener and test three uses of the same operation.
+      For correction, the oracle provides the true source and destination points at every step.
+      For steering, we train the action expert with a single sentence shared across all ten tasks in place of the instruction, so that the concept is the only input that tells the robot which bowl to pick, and the oracle provides the position of the other, identical bowl as the source.
+      For an unseen object, the oracle provides the position of the ramekin, which is never moved in any demonstration, and we compare against Direct Action whose instruction asks for the ramekin.
+    </p>
     <figure>
       <img src="./static/images/manip-interventions.png" alt="Manipulation interventions">
-      <figcaption class="cap">Two runs from the same start in each panel.</figcaption>
+      <figcaption class="cap">Intervention on the manipulation concept, with two runs from the same start in each panel, without (top) and with (bottom) the intervention.</figcaption>
     </figure>
     <div class="columns">
       <div class="column">
         <video autoplay muted loop playsinline width="100%"><source src="./static/videos/correct-task8.mp4" type="video/mp4"></video>
-        <p class="cap">(a) Correction: the robot fails with the predicted concept and succeeds with the corrected one.</p>
+        <p class="cap">(a) Correction: the robot fails with the predicted concept \(\hat c\) and succeeds with the corrected \(\tilde c\).</p>
       </div>
       <div class="column">
         <video autoplay muted loop playsinline width="100%"><source src="./static/videos/steer-task7.mp4" type="video/mp4"></video>
-        <p class="cap">(b) Steering: the intervener provides the other, identical bowl as the source, and the robot places that bowl instead.</p>
+        <p class="cap">(b) Steering: the intervener provides the other, identical bowl as the source \(\tilde a^1_t\), and the robot places that bowl instead.</p>
       </div>
       <div class="column">
         <video autoplay muted loop playsinline width="100%"><source src="./static/videos/ramekin-task0.mp4" type="video/mp4"></video>
-        <p class="cap">(c) Unseen object: Direct Action does not place the ramekin when its instruction asks for it, whereas providing the ramekin as the source makes the robot place it.</p>
+        <p class="cap">(c) Unseen object: Direct Action does not place the ramekin when its instruction \(\tilde H\) asks for it, whereas providing the ramekin as the source \(\tilde a^1_t\) makes the robot place it.</p>
       </div>
     </div>
 
     <br>
     <h3 class="title is-4">Navigation</h3>
-    <p class="cap">Claude sees the predicted costmap, never the true one, and names a sector or &ldquo;none&rdquo;.</p>
+    <p>
+      We split the spatial concept bottleneck of navigation, the costmap, into three sectors: left, center, and right, which map the three most common commands an intervener would likely give.
+      The VLM is provided the last six camera frames taken five steps apart, eight frames from the earlier traversal, the current view, the sub-goal-containing view, and the final destination image.
+      Most importantly, the VLM is provided only the predicted costmap \(\hat{c}_t\) (and never the true costmap \(c_t\)) to propose an intervention.
+      It is required to output &ldquo;none&rdquo; if no change is required, or the proposed sector along with a brief reasoning.
+      We use the oracle to detect differences between the predicted and true costmaps and trigger the intervention.
+    </p>
+    <p class="cap">Each video shows one episode without (left) and with (right) intervention: the RGB view and the costmap (blue is low cost, white square: least-cost cell).</p>
     <div id="nav-carousel" class="carousel results-carousel">
       <div class="item">
         <video autoplay muted loop playsinline><source src="./static/videos/nav-rescued__imitate__DYehNKdT76V_0000000_toilet_115.mp4" type="video/mp4"></video>
-        <p class="cap">Imitate, rescued. Left: no edits. Right: Claude intervenes when the oracle trigger fires.</p>
+        <p class="cap">Imitate: the VLM moves the costmap's minimum off the wall to the middle of the corridor, and the robot reaches the goal.</p>
       </div>
       <div class="item">
         <video autoplay muted loop playsinline><source src="./static/videos/nav-rescued__imitate__bCPU9suPUw9_0000000_chair_11.mp4" type="video/mp4"></video>
-        <p class="cap">Imitate, rescued. Left: no edits. Right: Claude intervenes when the oracle trigger fires.</p>
+        <p class="cap">Imitate: &ldquo;The bed blocks the right side.&rdquo; Without intervention the robot is never able to leave the room.</p>
       </div>
       <div class="item">
         <video autoplay muted loop playsinline><source src="./static/videos/nav-rescued__reverse__Dd4bFSTQ8gi_0000000_sofa_9.mp4" type="video/mp4"></video>
-        <p class="cap">Reverse, rescued. Left: no edits. Right: Claude intervenes when the oracle trigger fires.</p>
+        <p class="cap">Reverse: the VLM turns left even though the oracle's sector was right, and the robot reaches the goal.</p>
       </div>
       <div class="item">
         <video autoplay muted loop playsinline><source src="./static/videos/nav-rescued__shortcut__BAbdmeyTvMZ_0000000_chair_68.mp4" type="video/mp4"></video>
-        <p class="cap">Shortcut, rescued. Left: no edits. Right: Claude intervenes when the oracle trigger fires.</p>
+        <p class="cap">Shortcut: the robot reaches the goal only with the VLM's interventions.</p>
       </div>
       <div class="item">
         <video autoplay muted loop playsinline><source src="./static/videos/nav-broken__shortcut__mL8ThkuaVTM_0000000_bed_26.mp4" type="video/mp4"></video>
-        <p class="cap">Shortcut, broken. Left: no edits. Right: Claude intervenes when the oracle trigger fires.</p>
+        <p class="cap">Shortcut, a failure case: the robot reaches the goal without intervention but not with it.</p>
       </div>
     </div>
-    <p class="cap has-text-centered">Each video shows the camera and the costmap the controller receives, where blue is cheap and the white box is the minimum.</p>
   </div>
 </section>
 
@@ -249,39 +288,54 @@
   <div class="container is-max-desktop">
     <h2 class="title is-3">More qualitative results</h2>
 
-    <h3 class="title is-4">Navigation: rescued by the VLM</h3>
+    <h3 class="title is-4">Navigation: how to read these panels</h3>
+    <p>
+      Each panel shows one decision of the VLM.
+      The top lines give the task and step, the VLM's chosen sector next to the oracle's and the predicted costmap's sectors, and the VLM's stated reason.
+      The strip below shows the walkthrough frames the VLM was given, from the robot's position to the destination (green border).
+      The left block is what the VLM saw, the current view with the predicted costmap over it, where the cross marks the costmap's lowest-cost cell.
+      The middle block is the VLM's choice, where the circle marks the new target.
+      The right column shows the reference and destination frames.
+    </p>
+
+    <h3 class="title is-4">Navigation: successful interventions</h3>
     <div class="columns is-multiline gallery">
       <div class="column is-full">
         <img src="./static/images/rescued-imitate-wall-to-corridor.jpg" alt="">
-        <p class="cap">Imitate: Claude moves the costmap's minimum off a wall onto the corridor, which is also the oracle's sector.</p>
+        <p class="cap">Imitate: the VLM moves the target off a wall onto the open corridor, the same sector the oracle would choose.</p>
       </div>
       <div class="column is-full">
         <img src="./static/images/rescued-shortcut-off-furniture.jpg" alt="">
-        <p class="cap">Shortcut: Claude steers the robot off the furniture toward the open living area, against the oracle's sector.</p>
+        <p class="cap">Shortcut: the VLM moves the target off the furniture toward the open living area, a different sector from the oracle's, and the robot reaches the goal.</p>
       </div>
       <div class="column is-full">
         <img src="./static/images/rescued-reverse-hallway-behind.jpg" alt="">
-        <p class="cap">Reverse: Claude recognizes that the way out of the bedroom is behind and to the left.</p>
+        <p class="cap">Reverse: the VLM recognizes that the way out of the bedroom is behind and to the left.</p>
       </div>
     </div>
 
-    <h3 class="title is-4">Navigation: broken by the VLM</h3>
+    <h3 class="title is-4">Navigation: failure cases</h3>
+    <p>
+      The VLM's stated reason shows why.
+      In Alt-goal the goal is not at the end of the recorded route, so relying on the route frames over the destination image misleads the VLM.
+    </p>
     <div class="columns is-multiline gallery">
       <div class="column is-full">
         <img src="./static/images/broken-shortcut-bed-blocks-center.jpg" alt="">
-        <p class="cap">Shortcut, behind the oracle trigger: Claude goes around the bed to the right where the oracle's sector was left, and the episode is lost.</p>
+        <p class="cap">Shortcut: &ldquo;The bed blocks the center, open floor toward the doorway on the right is the way forward.&rdquo; The VLM follows the doorway seen in the route frames, while the shorter path to the goal goes left.</p>
       </div>
       <div class="column is-full">
         <img src="./static/images/nogate-broken-altgoal-false-alarm.jpg" alt="">
-        <p class="cap">Alt-goal, without the trigger: the predicted costmap was correct, and Claude moves its minimum to a doorway on the left.</p>
+        <p class="cap">Alt-goal: the predicted costmap was already correct, and the VLM follows the route frames toward a doorway on the left, although the goal lies ahead.</p>
       </div>
       <div class="column is-full">
         <img src="./static/images/nogate-broken-altgoal-bathroom-doorway.jpg" alt="">
-        <p class="cap">Alt-goal, without the trigger: the robot is already at the doorway the costmap points into, and Claude turns it back toward the hallway.</p>
+        <p class="cap">Alt-goal: &ldquo;The robot has driven into the bathroom doorway.&rdquo; The VLM follows the route frames back toward the hallway, although the goal lies ahead.</p>
       </div>
     </div>
 
     <h3 class="title is-4">Manipulation</h3>
+    <p class="cap">Each figure shows two runs from the same start: the top row without the intervention and the bottom row with it. Orange and blue boxes show where the concept places the source and the destination, and green marks the true positions.</p>
     <figure>
       <img src="./static/images/manip-correct.png" alt="Correction">
       <figcaption class="cap">Correction: the robot fails with the predicted concept and places the bowl with the corrected one.</figcaption>
