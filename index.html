@@ -180,11 +180,11 @@
     <h2 class="title is-3">Results</h2>
 
     <h3 class="title is-4">Navigation</h3>
-    <p class="cap">Spatial CBM is on par or better than predicting Direct Actions.</p>
+    <p class="cap">Spatial CBM is on par with or better than Direct Action on average.</p>
     <div class="table-wrap">
       <table class="table paper-table">
         <thead>
-          <tr><th></th><th colspan="2">Imitate</th><th colspan="2">Alt Goal</th><th colspan="2">Shortcut</th><th colspan="2">Reverse</th><th colspan="2"><i>Average</i></th></tr>
+          <tr><th></th><th colspan="2">Imitate</th><th colspan="2">Alt-goal</th><th colspan="2">Shortcut</th><th colspan="2">Reverse</th><th colspan="2"><i>Average</i></th></tr>
           <tr><th>Method</th><th>SPL</th><th>SSPL</th><th>SPL</th><th>SSPL</th><th>SPL</th><th>SSPL</th><th>SPL</th><th>SSPL</th><th>SPL</th><th>SSPL</th></tr>
         </thead>
         <tbody>
@@ -262,7 +262,7 @@
         </table>
       </div>
     </div>
-    <p class="cap">Success (%). (a) Where the bottleneck sits, for the policy trained with a single sentence shared across all ten tasks, so that the instruction does not name the bowl. (b) The bowl, or the bowl and the plate, moved 5&ndash;10&nbsp;cm from their positions in the demonstrations.</p>
+    <p class="cap">Success (%). (a) Where the bottleneck sits, for the policy trained with a single sentence shared across all ten tasks, so that the instruction does not name the bowl. The Images and Neither rows use one seed. (b) The bowl (in the five tasks where it rests on the table), or the bowl and the plate, moved 5&ndash;10&nbsp;cm from their positions in the demonstrations.</p>
   </div>
 </section>
 
@@ -324,7 +324,7 @@
       It is provided the last six camera frames taken five steps apart, eight frames from the earlier traversal, the current view, the sub-goal-containing view, and the final destination image.
       Most importantly, Claude is provided only the predicted costmap \(\hat{c}_t\) (and never the true costmap \(c_t\)) to propose an intervention.
       It is required to output &ldquo;none&rdquo; if no change is required, or the proposed sector along with a brief reasoning.
-      The trigger is tested in two cases: with the oracle gate, where the oracle detects differences between the predicted and true costmaps and triggers the intervention, and without it, where Claude decides at every check.
+      The trigger is tested with and without the oracle gate. With the gate, the oracle detects differences between the predicted and true costmaps and triggers the intervention. Without it, Claude decides at every check.
     </p>
     <p>
       Without edits, Spatial CBM succeeds in 84 of the 126 episodes.
@@ -391,13 +391,12 @@
   <div class="container is-max-desktop">
     <h2 class="title is-3">More qualitative results</h2>
 
-    <h3 class="title is-4">Navigation: episodes rescued by Claude</h3>
+    <h3 class="title is-4">Navigation: episodes rescued by Claude behind the oracle gate</h3>
     <p>
       Each panel shows one decision of Claude, with its stated reason at the top and the traversal frames it was given below.
       Left: what Claude saw, the current view with the predicted costmap, where + marks its minimum.
       Middle: Claude's choice, where the circle marks the new sub-goal.
-      Right: the reference and destination frames.
-      We include failures as well.
+      Right: the frame with the sub-goal circled (top) and the destination (bottom).
     </p>
     <div class="columns is-multiline gallery">
       <div class="column is-full">
@@ -416,8 +415,8 @@
 
     <h3 class="title is-4">Navigation: episodes broken by Claude</h3>
     <p>
-      Claude's stated reason shows why.
-      In Alt-goal the goal is not at the end of the recorded route, so relying on the route frames over the destination image misleads the VLM.
+      In each panel, Claude's stated reason shows why the edit broke the episode.
+      In Alt-goal the goal is not at the end of the recorded route, so relying on the route frames over the destination image misleads Claude.
     </p>
     <div class="columns is-multiline gallery">
       <div class="column is-full">
@@ -426,11 +425,11 @@
       </div>
       <div class="column is-full">
         <img src="./static/images/nogate-broken-altgoal-false-alarm.jpg" alt="">
-        <p class="cap">Alt-goal: the predicted costmap was already correct, and Claude follows the route frames toward a doorway on the left, although the goal lies ahead.</p>
+        <p class="cap">Alt-goal, without the oracle gate: the predicted costmap was already correct, and Claude follows the route frames toward a doorway on the left, although the goal lies ahead.</p>
       </div>
       <div class="column is-full">
         <img src="./static/images/nogate-broken-altgoal-bathroom-doorway.jpg" alt="">
-        <p class="cap">Alt-goal: &ldquo;The robot has driven into the bathroom doorway.&rdquo; Claude follows the route frames back toward the hallway, although the goal lies ahead.</p>
+        <p class="cap">Alt-goal, without the oracle gate: &ldquo;The robot has driven into the bathroom doorway.&rdquo; Claude follows the route frames back toward the hallway, although the goal lies ahead.</p>
       </div>
     </div>
 
