@@ -103,7 +103,7 @@
       <div class="columns">
         <div class="column">
           <video autoplay muted loop playsinline width="100%"><source src="./static/videos/nav-rescued__imitate__DYehNKdT76V_0000000_toilet_115.mp4" type="video/mp4"></video>
-          <p class="cap">Navigation: the VLM moves the costmap's minimum off the wall, and the robot reaches the goal.</p>
+          <p class="cap">Navigation: Claude moves the costmap's minimum off the wall, and the robot reaches the goal.</p>
         </div>
         <div class="column">
           <video autoplay muted loop playsinline width="100%"><source src="./static/videos/steer-task7.mp4" type="video/mp4"></video>
@@ -132,12 +132,21 @@
       <figcaption class="cap">Spatial concept bottleneck for navigation. The concept predictor \(g\) (VGGT with fine-tuned global attention and a costmap head) predicts the costmap \(\hat C\) from the current view \(o_t\), the eight localized traversal frames \(m_{1..8}\) and the sub-goal \(a_t\). The task predictor \(f\) (the action head) takes only the costmap as input and outputs five waypoints.</figcaption>
     </figure>
     \[ C_t(u) = \psi\big(a^1_t, X_t(u)\big) = \big\lVert a^1_t - X_t(u) \big\rVert_2 \]
-    <p class="cap has-text-centered">We define a spatial concept bottleneck for navigation as a visual representation of navigation affordances in the robot's current view. The sub-goal pixel is the only anchor, and the egocentric entity is the 3D point \(X_t(u)\) of each pixel \(u\) of the current observation.</p>
+    <p>
+      We define a spatial concept bottleneck for navigation as a visual representation of navigation affordances in the robot's current view.
+      Here, the only anchor is the sub-goal, the pixel with the shortest path to the goal in the eight traversal frames nearest to the robot, and the egocentric entity is the 3D point \(X_t(u)\) of each pixel \(u\) of the current view.
+      We average the cost over the patches of a \(16 \times 16\) grid on the current view and min-max normalize per image, as in ObjectReact.
+    </p>
+    <p>
+      For navigation, what matters is the path length from a pixel to the goal around obstacles, but the perception backend, VGGT, predicts 3D Euclidean geometry and cannot see beyond walls or the provided views.
+      We therefore pick the sub-goal by path length and keep the costmap Euclidean, the straight-line distance to that sub-goal.
+      Since the path to a nearby sub-goal is often close enough to a straight line, we expect this concept to be easier for VGGT to learn than the path length itself.
+    </p>
 
     <h3 class="title is-4">Manipulation</h3>
     <figure>
       <img src="./static/images/manip-setup.png" alt="Manipulation setup">
-      <figcaption class="cap">Spatial concept bottleneck on SmolVLA. Left: the concept \(c\) is where the source (\(c^1\)) and the destination (\(c^2\)) are relative to the gripper. The frozen vision encoder feeds only the concept predictor \(g\), whose prediction \(\hat c\) enters the task predictor \(f\) as concept tokens, after the instruction \(H\) and the state, and the image tokens are removed. An intervention replaces \(\hat c\) with \(\tilde c\).</figcaption>
+      <figcaption class="cap">Spatial concept bottleneck on SmolVLA. Left: the concept \(c\) is where the source (\(c^1\)) and the destination (\(c^2\)) are relative to the gripper. The frozen vision encoder feeds only the concept predictor \(g\), which also reads the instruction \(H\) and the state. Its prediction \(\hat c\) enters the task predictor \(f\) as concept tokens, after the instruction \(H\) and the state, and the image tokens are removed. \(f\) is SmolVLA's frozen language layers and its trained action expert. An intervention replaces \(\hat c\) with \(\tilde c\).</figcaption>
     </figure>
     \[ c^k_t = \psi (a^k_t, r_t) = \beta\left(a^k_t - r_t\right), \qquad k \in \{1, 2\} \]
     <p>
@@ -146,6 +155,11 @@
       We use a single egocentric spatial entity that represents the end effector position \(r_t\), and \(\beta\) discretizes each axis of the difference in positions into 13 bins on a logarithmic scale.
       The concept therefore consists of six values, the \(x\), \(y\) and \(z\) offsets of the source and of the destination from the gripper.
       The bins are narrow near the gripper and wide far from it, giving centimetre precision close to the object and a coarse direction elsewhere.
+    </p>
+    <p>
+      The concept predictor \(g\) is a single cross-attention layer with six trainable query vectors, one for each concept token: the \(x\), \(y\) and \(z\) bins of the source and destination.
+      The queries attend to the image tokens of both cameras from the frozen vision encoder, the robot state, and the word embeddings of the instruction, and each query's output goes to its own classifier over the 13 bins, trained with cross-entropy.
+      The action expert reads only the instruction \(H\), the state \(\rho_t\) and the six concept tokens.
     </p>
     <div class="columns is-vcentered">
       <div class="column is-two-thirds">
@@ -176,14 +190,21 @@
         <tbody>
           <tr><td>GT-Geodesics</td><td>96.43<span class="pm">±2.34</span></td><td>98.78<span class="pm">±1.72</span></td><td>86.53<span class="pm">±4.07</span></td><td>91.16<span class="pm">±3.20</span></td><td>88.42<span class="pm">±0.20</span></td><td>91.67<span class="pm">±1.19</span></td><td>82.99<span class="pm">±0.32</span></td><td>91.97<span class="pm">±0.39</span></td><td>88.59<span class="pm">±1.63</span></td><td>93.40<span class="pm">±0.83</span></td></tr>
           <tr><td>GT-ED</td><td>72.16<span class="pm">±2.00</span></td><td>74.58<span class="pm">±1.53</span></td><td>70.29<span class="pm">±4.89</span></td><td>78.49<span class="pm">±5.94</span></td><td>67.76<span class="pm">±2.28</span></td><td>70.72<span class="pm">±3.19</span></td><td>68.41<span class="pm">±2.51</span></td><td>77.53<span class="pm">±1.12</span></td><td>69.65<span class="pm">±1.78</span></td><td>75.33<span class="pm">±1.35</span></td></tr>
+          <tr><td>GT-ED (sub-goal)</td><td>89.36<span class="pm">±0.71</span></td><td>92.36<span class="pm">±0.25</span></td><td>82.34<span class="pm">±3.23</span></td><td>87.64<span class="pm">±3.04</span></td><td>79.52<span class="pm">±0.56</span></td><td>81.00<span class="pm">±0.35</span></td><td>7.87<span class="pm">±2.12</span></td><td>23.08<span class="pm">±0.16</span></td><td>64.77<span class="pm">±0.60</span></td><td>71.02<span class="pm">±0.69</span></td></tr>
           <tr class="rule"><td>Direct Action</td><td>82.61<span class="pm">±5.77</span></td><td>86.92<span class="pm">±3.07</span></td><td>59.99<span class="pm">±13.07</span></td><td>67.84<span class="pm">±12.07</span></td><td>61.15<span class="pm">±5.91</span></td><td>71.86<span class="pm">±4.21</span></td><td>18.41<span class="pm">±3.28</span></td><td><b>34.47</b><span class="pm">±2.82</span></td><td>55.54<span class="pm">±0.47</span></td><td>65.28<span class="pm">±0.49</span></td></tr>
           <tr><td>Spatial CAM</td><td><b>87.25</b><span class="pm">±0.03</span></td><td><b>89.70</b><span class="pm">±0.46</span></td><td>28.18<span class="pm">±7.16</span></td><td>41.45<span class="pm">±9.01</span></td><td>38.13<span class="pm">±0.27</span></td><td>42.01<span class="pm">±0.70</span></td><td>7.86<span class="pm">±2.25</span></td><td>15.71<span class="pm">±0.78</span></td><td>40.36<span class="pm">±1.17</span></td><td>47.22<span class="pm">±2.00</span></td></tr>
-          <tr><td>Spatial CBM*</td><td>81.14<span class="pm">±5.83</span></td><td>86.44<span class="pm">±2.54</span></td><td>57.81<span class="pm">±2.94</span></td><td>68.08<span class="pm">±3.56</span></td><td>66.06<span class="pm">±3.92</span></td><td>74.20<span class="pm">±2.97</span></td><td>12.55<span class="pm">±0.08</span></td><td>27.33<span class="pm">±2.27</span></td><td>54.39<span class="pm">±3.19</span></td><td>64.01<span class="pm">±1.70</span></td></tr>
-          <tr><td>Spatial CBM</td><td>80.80<span class="pm">±2.08</span></td><td>86.12<span class="pm">±1.82</span></td><td><b>68.27</b><span class="pm">±6.43</span></td><td><b>73.89</b><span class="pm">±5.33</span></td><td><b>73.06</b><span class="pm">±2.69</span></td><td><b>80.29</b><span class="pm">±1.80</span></td><td><b>19.38</b><span class="pm">±10.22</span></td><td>33.73<span class="pm">±9.12</span></td><td><b>60.38</b><span class="pm">±5.36</span></td><td><b>68.51</b><span class="pm">±4.52</span></td></tr>
+          <tr><td>Spatial CBM*</td><td>80.53<span class="pm">±8.69</span></td><td>87.78<span class="pm">±3.16</span></td><td><b>74.30</b><span class="pm">±3.57</span></td><td><b>80.99</b><span class="pm">±1.40</span></td><td>65.29<span class="pm">±7.25</span></td><td>71.42<span class="pm">±3.12</span></td><td>13.90<span class="pm">±2.30</span></td><td>33.72<span class="pm">±2.38</span></td><td>58.51<span class="pm">±4.30</span></td><td>68.48<span class="pm">±1.82</span></td></tr>
+          <tr><td>Spatial CBM</td><td>80.80<span class="pm">±2.08</span></td><td>86.12<span class="pm">±1.82</span></td><td>68.27<span class="pm">±6.43</span></td><td>73.89<span class="pm">±5.33</span></td><td><b>73.06</b><span class="pm">±2.69</span></td><td><b>80.29</b><span class="pm">±1.80</span></td><td><b>19.38</b><span class="pm">±10.22</span></td><td>33.73<span class="pm">±9.12</span></td><td><b>60.38</b><span class="pm">±5.36</span></td><td><b>68.51</b><span class="pm">±4.52</span></td></tr>
         </tbody>
       </table>
     </div>
-    <p class="cap">SPL and SSPL on four navigation tasks, with the best non-oracle scores in bold.</p>
+    <p class="cap">SPL and SSPL on four navigation tasks, mean and standard deviation over two seeds on all 126 episodes (32 Imitate, 32 Alt-goal, 31 Shortcut, 31 Reverse). Best non-oracle scores are in bold. GT-Geodesics and GT-ED have no sub-goal and give the distance to the final goal along the shortest path and in a straight line, respectively. GT-ED (sub-goal) is the true concept, and every learned row uses the same sub-goal.</p>
+    <p>
+      With our own true concept, GT-ED (sub-goal), the controller does better than every learned variant on Imitate, Alt-goal and Shortcut.
+      This implies that having the spatial concept as an intermediary is in itself not a performance bottleneck, rather it is the lack of the ability to predict perfect concepts.
+      GT-ED (sub-goal) fails only on Reverse, where the sub-goal is often behind the robot.
+      The straight-line distance to a point behind the robot is lowest at the pixels nearest the robot, so the costmap gives no signal to turn around.
+    </p>
 
     <br>
     <h3 class="title is-4">Manipulation</h3>
@@ -206,7 +227,42 @@
         </tbody>
       </table>
     </div>
-    <p class="cap">Success (%) on the ten LIBERO-Spatial tasks over two training seeds (<sup>†</sup>one seed).</p>
+    <p class="cap">Success (%) on the ten LIBERO-Spatial tasks over two training seeds (<sup>†</sup>one seed), with 200 episodes per seed. Best non-oracle scores are in bold.</p>
+    <p>
+      With predicted concepts, both Spatial CBM* and Spatial CBM fall below Direct Action.
+      As in navigation, this gap comes from predicting the concept and not from the bottleneck itself, and intervening on the concept recovers part of it.
+      When objects are moved 5&ndash;10&nbsp;cm away from their positions in the demonstrations (table (b) below), true concepts still guide the robot at least as well as Direct Action, but the concept predictor makes more errors and Spatial CBM falls below Direct Action, so here as well the limit is the concept predictor.
+    </p>
+    <div class="columns is-centered">
+      <div class="column is-narrow table-wrap">
+        <table class="table paper-table">
+          <thead>
+            <tr><th>(a) Action expert reads</th><th>GT (\(c\))</th><th>Spatial CBM* (\(\hat c\))</th><th>Steering</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Concepts</td><td>85.8<span class="pm">±0.4</span></td><td>79.8<span class="pm">±1.8</span></td><td><b>93.5</b><span class="pm">±2.1</span></td></tr>
+            <tr><td>Images + concepts</td><td>86.5<span class="pm">±0.0</span></td><td>80.8<span class="pm">±1.1</span></td><td>42.8<span class="pm">±8.1</span></td></tr>
+            <tr><td>Images</td><td>61.5</td><td>&ndash;</td><td>&ndash;</td></tr>
+            <tr><td>Neither</td><td>4.5</td><td>&ndash;</td><td>&ndash;</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="column is-narrow table-wrap">
+        <table class="table paper-table">
+          <thead>
+            <tr><th>(b) Method</th><th>Bowl</th><th>Bowl + plate</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>GT</td><td>45.5<span class="pm">±3.5</span></td><td>16.8<span class="pm">±3.2</span></td></tr>
+            <tr><td>GT, one sentence</td><td>68.0<span class="pm">±1.4</span></td><td>25.1<span class="pm">±2.8</span></td></tr>
+            <tr class="rule"><td>Direct Action</td><td><b>28.5</b><span class="pm">±2.1</span></td><td><b>15.3</b><span class="pm">±1.1</span></td></tr>
+            <tr><td>Spatial CBM*</td><td><b>28.5</b><span class="pm">±3.5</span></td><td>7.3<span class="pm">±1.1</span></td></tr>
+            <tr><td>Spatial CBM</td><td>23.5<span class="pm">±0.7</span></td><td>3.3<span class="pm">±0.4</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <p class="cap">Success (%). (a) Where the bottleneck sits, for the policy trained with a single sentence shared across all ten tasks, so that the instruction does not name the bowl. (b) The bowl, or the bowl and the plate, moved 5&ndash;10&nbsp;cm from their positions in the demonstrations.</p>
   </div>
 </section>
 
@@ -229,6 +285,11 @@
       For correction, the oracle provides the true source and destination points at every step.
       For steering, we train the action expert with a single sentence shared across all ten tasks in place of the instruction, so that the concept is the only input that tells the robot which bowl to pick, and the oracle provides the position of the other, identical bowl as the source.
       For an unseen object, the oracle provides the position of the ramekin, which is never moved in any demonstration, and we compare against Direct Action whose instruction asks for the ramekin.
+    </p>
+    <p>
+      Editing the source concept makes the robot place the other bowl in 93.5% of the episodes.
+      Keeping the image tokens along with concepts gives about the same success, but steering then works only in some tasks, as the images pull the robot back to the bowl it was trained on (table (a) above).
+      For the unseen object, the robot places the ramekin in 67.0% of the episodes, against 7.0% for Direct Action.
     </p>
     <figure>
       <img src="./static/images/manip-interventions.png" alt="Manipulation interventions">
@@ -253,16 +314,29 @@
     <h3 class="title is-4">Navigation</h3>
     <p>
       We split the spatial concept bottleneck of navigation, the costmap, into three sectors: left, center, and right, which map the three most common commands an intervener would likely give.
-      The VLM is provided the last six camera frames taken five steps apart, eight frames from the earlier traversal, the current view, the sub-goal-containing view, and the final destination image.
-      Most importantly, the VLM is provided only the predicted costmap \(\hat{c}_t\) (and never the true costmap \(c_t\)) to propose an intervention.
+      Each sector is a column which spans five, six, and five pixels respectively of the \(16\times16\) costmap.
+      Every five steps, the intervener is allowed to pick a sector.
+      The sub-goal is replaced by the lowest-cost pixel in the middle of that sector as \(\tilde{a}^1_t\), and the costmap is recomputed as each pixel's Euclidean distance to it.
+      The controller keeps using this costmap until the intervener is asked again.
+    </p>
+    <p>
+      We use Claude Opus 5 as the VLM intervener.
+      It is provided the last six camera frames taken five steps apart, eight frames from the earlier traversal, the current view, the sub-goal-containing view, and the final destination image.
+      Most importantly, Claude is provided only the predicted costmap \(\hat{c}_t\) (and never the true costmap \(c_t\)) to propose an intervention.
       It is required to output &ldquo;none&rdquo; if no change is required, or the proposed sector along with a brief reasoning.
-      We use the oracle to detect differences between the predicted and true costmaps and trigger the intervention.
+      The trigger is tested in two cases: with the oracle gate, where the oracle detects differences between the predicted and true costmaps and triggers the intervention, and without it, where Claude decides at every check.
+    </p>
+    <p>
+      Without edits, Spatial CBM succeeds in 84 of the 126 episodes.
+      The oracle's intervention fixes six episodes and breaks one.
+      When Claude is triggered on oracle disagreement, it fixes ten episodes and breaks three.
+      When Claude is ungated, it still fixes ten episodes but breaks 16, eight of them on Alt-goal.
     </p>
     <p class="cap">Each video shows one episode without (left) and with (right) intervention: the RGB view and the costmap (blue is low cost, white square: least-cost cell).</p>
     <div id="nav-carousel" class="carousel results-carousel">
       <div class="item">
         <video autoplay muted loop playsinline><source src="./static/videos/nav-rescued__imitate__DYehNKdT76V_0000000_toilet_115.mp4" type="video/mp4"></video>
-        <p class="cap">Imitate: the VLM moves the costmap's minimum off the wall to the middle of the corridor, and the robot reaches the goal.</p>
+        <p class="cap">Imitate: Claude moves the costmap's minimum off the wall to the middle of the corridor, and the robot reaches the goal.</p>
       </div>
       <div class="item">
         <video autoplay muted loop playsinline><source src="./static/videos/nav-rescued__imitate__bCPU9suPUw9_0000000_chair_11.mp4" type="video/mp4"></video>
@@ -270,11 +344,11 @@
       </div>
       <div class="item">
         <video autoplay muted loop playsinline><source src="./static/videos/nav-rescued__reverse__Dd4bFSTQ8gi_0000000_sofa_9.mp4" type="video/mp4"></video>
-        <p class="cap">Reverse: the VLM turns left even though the oracle's sector was right, and the robot reaches the goal.</p>
+        <p class="cap">Reverse: Claude turns left even though the oracle's sector was right, and the robot reaches the goal.</p>
       </div>
       <div class="item">
         <video autoplay muted loop playsinline><source src="./static/videos/nav-rescued__shortcut__BAbdmeyTvMZ_0000000_chair_68.mp4" type="video/mp4"></video>
-        <p class="cap">Shortcut: the robot reaches the goal only with the VLM's interventions.</p>
+        <p class="cap">Shortcut: the robot reaches the goal only with Claude's interventions.</p>
       </div>
       <div class="item">
         <video autoplay muted loop playsinline><source src="./static/videos/nav-broken__shortcut__mL8ThkuaVTM_0000000_bed_26.mp4" type="video/mp4"></video>
@@ -286,59 +360,87 @@
 
 <section class="section">
   <div class="container is-max-desktop">
+    <h2 class="title is-3">Real-world results: navigation</h2>
+    <p>
+      We test the navigation setup on a Unitree Go2 in a home, run open loop on recorded data.
+      We record a mapping run and three repeat runs of the same route.
+      We use the frames from these three runs to see where we can intervene.
+    </p>
+    <p>
+      The setup is the same as in simulation, except the sub-goal comes from A* on the robot's lidar floor map instead of the navigation mesh.
+      The model is the same one, trained only in simulation.
+    </p>
+    <p>
+      We gave Claude (Opus 5.5) the same inputs as in the navigation intervention (current view with the predicted costmap, sub-goal frame, destination) on 8 frames taken just before the robot turns.
+      It reasoned for an edit on 3 of them, and each edit moved the costmap minimum where Claude intended.
+      In one, the minimum was on a bed and Claude answered &ldquo;center&rdquo;, since &ldquo;the white air purifier from the destination picture stands on open floor at the right edge of the center region&rdquo;.
+      On the other 5 it said &ldquo;none&rdquo;.
+    </p>
+    <figure>
+      <img src="./static/images/go2-claude-input.png" alt="Claude's inputs for one real frame">
+      <figcaption class="cap">Claude's inputs for one frame. Left: the current view with the predicted costmap \(\hat C\), where + marks its minimum. Middle: the frame from the mapping run with the sub-goal circled. Right: the destination.</figcaption>
+    </figure>
+    <figure>
+      <img src="./static/images/go2-claude-edits.png" alt="Claude's edits on real frames">
+      <figcaption class="cap">Claude's edits on real frames. Left: the predicted costmap \(\hat C\), with its minimum circled. Right: the costmap after re-running \(g\) with a pixel in the sector Claude names as the new sub-goal (cross), and its minimum moves there. Claude's reasons: (a) &ldquo;The + sits at the foot of the curtain against the wall, a dead end, while the open floor and the room with the whiteboard stand lie past the curtain to the right.&rdquo; (b) &ldquo;The destination is the white air purifier in front of the whiteboard, which stands at the right edge of the center column, while the + sits at the bottom of the left column against the bed frame.&rdquo; (c) &ldquo;The + sits on the bed at the far left, while the white air purifier from the destination picture stands on open floor at the right edge of the center region.&rdquo;</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
     <h2 class="title is-3">More qualitative results</h2>
 
-    <h3 class="title is-4">Navigation: how to read these panels</h3>
+    <h3 class="title is-4">Navigation: episodes rescued by Claude</h3>
     <p>
-      Each panel shows one decision of the VLM.
-      The top lines give the task and step, the VLM's chosen sector next to the oracle's and the predicted costmap's sectors, and the VLM's stated reason.
-      The strip below shows the walkthrough frames the VLM was given, from the robot's position to the destination (green border).
-      The left block is what the VLM saw, the current view with the predicted costmap over it, where the cross marks the costmap's lowest-cost cell.
-      The middle block is the VLM's choice, where the circle marks the new target.
-      The right column shows the reference and destination frames.
+      Each panel shows one decision of Claude, with its stated reason at the top and the traversal frames it was given below.
+      Left: what Claude saw, the current view with the predicted costmap, where + marks its minimum.
+      Middle: Claude's choice, where the circle marks the new sub-goal.
+      Right: the reference and destination frames.
+      We include failures as well.
     </p>
-
-    <h3 class="title is-4">Navigation: successful interventions</h3>
     <div class="columns is-multiline gallery">
       <div class="column is-full">
         <img src="./static/images/rescued-imitate-wall-to-corridor.jpg" alt="">
-        <p class="cap">Imitate: the VLM moves the target off a wall onto the open corridor, the same sector the oracle would choose.</p>
+        <p class="cap">Imitate: Claude moves the costmap's minimum off a wall onto the corridor, which is also the oracle's sector.</p>
       </div>
       <div class="column is-full">
         <img src="./static/images/rescued-shortcut-off-furniture.jpg" alt="">
-        <p class="cap">Shortcut: the VLM moves the target off the furniture toward the open living area, a different sector from the oracle's, and the robot reaches the goal.</p>
+        <p class="cap">Shortcut: Claude steers the robot off the furniture toward the open living area, against the oracle's sector.</p>
       </div>
       <div class="column is-full">
         <img src="./static/images/rescued-reverse-hallway-behind.jpg" alt="">
-        <p class="cap">Reverse: the VLM recognizes that the way out of the bedroom is behind and to the left.</p>
+        <p class="cap">Reverse (second training seed): Claude recognizes that the way out of the bedroom is behind and to the left.</p>
       </div>
     </div>
 
-    <h3 class="title is-4">Navigation: failure cases</h3>
+    <h3 class="title is-4">Navigation: episodes broken by Claude</h3>
     <p>
-      The VLM's stated reason shows why.
+      Claude's stated reason shows why.
       In Alt-goal the goal is not at the end of the recorded route, so relying on the route frames over the destination image misleads the VLM.
     </p>
     <div class="columns is-multiline gallery">
       <div class="column is-full">
         <img src="./static/images/broken-shortcut-bed-blocks-center.jpg" alt="">
-        <p class="cap">Shortcut: &ldquo;The bed blocks the center, open floor toward the doorway on the right is the way forward.&rdquo; The VLM follows the doorway seen in the route frames, while the shorter path to the goal goes left.</p>
+        <p class="cap">Shortcut: &ldquo;The bed blocks the center, open floor toward the doorway on the right is the way forward.&rdquo; Claude follows the doorway seen in the route frames, while the shorter path to the goal goes left.</p>
       </div>
       <div class="column is-full">
         <img src="./static/images/nogate-broken-altgoal-false-alarm.jpg" alt="">
-        <p class="cap">Alt-goal: the predicted costmap was already correct, and the VLM follows the route frames toward a doorway on the left, although the goal lies ahead.</p>
+        <p class="cap">Alt-goal: the predicted costmap was already correct, and Claude follows the route frames toward a doorway on the left, although the goal lies ahead.</p>
       </div>
       <div class="column is-full">
         <img src="./static/images/nogate-broken-altgoal-bathroom-doorway.jpg" alt="">
-        <p class="cap">Alt-goal: &ldquo;The robot has driven into the bathroom doorway.&rdquo; The VLM follows the route frames back toward the hallway, although the goal lies ahead.</p>
+        <p class="cap">Alt-goal: &ldquo;The robot has driven into the bathroom doorway.&rdquo; Claude follows the route frames back toward the hallway, although the goal lies ahead.</p>
       </div>
     </div>
 
     <h3 class="title is-4">Manipulation</h3>
-    <p class="cap">Each figure shows two runs from the same start: the top row without the intervention and the bottom row with it. Orange and blue boxes show where the concept places the source and the destination, and green marks the true positions.</p>
+    <p>
+      The boxes show the bins the concept assigns to the source (orange) and the destination (blue) around the gripper, and green marks each object's true position.
+    </p>
     <figure>
       <img src="./static/images/manip-correct.png" alt="Correction">
-      <figcaption class="cap">Correction: the robot fails with the predicted concept and places the bowl with the corrected one.</figcaption>
+      <figcaption class="cap">Correction, from the same start. Top: with the predicted concept \(\hat c\), the source concept is off by two bins at the start of the approach, and the robot fails. Bottom: with the corrected concept \(\tilde c\), the robot places the bowl. This episode uses a concept predictor trained on \(128 \times 128\) images.</figcaption>
     </figure>
     <div class="columns is-centered">
       <div class="column is-half">
@@ -347,11 +449,11 @@
     </div>
     <figure>
       <img src="./static/images/manip-steer.png" alt="Steering">
-      <figcaption class="cap">Steering: with the other, identical bowl as the source, the robot places that bowl.</figcaption>
+      <figcaption class="cap">Steering, from the same start, with the action expert trained on a single sentence shared across all tasks. Top: with the true concept, the robot places the named bowl. Bottom: the intervener provides the other, identical bowl as the source \(\tilde a^1_t\), and the robot places that bowl.</figcaption>
     </figure>
     <figure>
       <img src="./static/images/manip-ramekin.png" alt="Unseen object">
-      <figcaption class="cap">Unseen object: Direct Action does not place the ramekin, and with the ramekin as the source the robot places it on the plate.</figcaption>
+      <figcaption class="cap">An object that no demonstration moves, from the same start. Top: Direct Action, with its instruction asking for the ramekin, does not place it. Bottom: the intervener provides the ramekin as the source \(\tilde a^1_t\), and the robot places it on the plate.</figcaption>
     </figure>
   </div>
 </section>
